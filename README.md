@@ -42,9 +42,13 @@ Agent 간 직접 통신을 지원하는 분산 시스템입니다. 각 agent는 
 
 ## 빠른 시작
 
-### 1️⃣ 키 생성
+### 1️⃣ 키 생성 및 리소스 초기화
 ```bash
+# 키 생성
 python tools/keygen.py
+
+# 리소스 초기화 (샘플 리소스 생성)
+python tools/init_resources.py
 ```
 
 ### 2️⃣ 모든 Agent 실행
@@ -139,6 +143,7 @@ print(response.json())
 ```python
 import requests
 from agents.base_agent import build_message, send_and_log
+
 
 msg = build_message(
     sender_id="my-agent",

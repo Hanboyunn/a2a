@@ -6,6 +6,7 @@ from typing import Dict, Callable, Optional
 import threading
 
 MONITOR_INGEST = "http://127.0.0.1:8100/ingest"
+MONITOR_EVAL = "http://127.0.0.1:8100/evaluate"
 
 # Agent registry: agent_id -> endpoint mapping
 # 기본 agent 엔드포인트 (하드코딩된 레지스트리)
@@ -62,9 +63,27 @@ def safe_json(r):
     try: return r.json()
     except Exception: return {"text": r.text[:400]}
 
+AGENT_MANAGER_URL = "http://127.0.0.1:8200"
+
 def register_agent(agent_id: str, endpoint: str):
-    """Register an agent's endpoint in the global registry"""
+    """Register an agent's endpoint in the global registry and Agent Manager"""
     AGENT_REGISTRY[agent_id] = endpoint
+    
+    # Also register with Agent Management Server
+    try:
+        requests.post(
+            f"{AGENT_MANAGER_URL}/register",
+            json={
+                "agent_id": agent_id,
+                "endpoint": endpoint,
+                "agent_type": agent_id.split("-")[1] if "-" in agent_id else "unknown",
+                "capabilities": [],
+                "metadata": {}
+            },
+            timeout=2
+        )
+    except:
+        pass  # Agent Manager가 없어도 계속 진행
 
 def get_agent_endpoint(agent_id: str) -> Optional[str]:
     """Get an agent's endpoint from the registry"""
@@ -92,6 +111,17 @@ class BaseAgentServer:
         @self.app.post("/a2a/invoke")
         async def invoke(req: Request):
             msg = await req.json()
+            # 수신 agent도 Trust Score 계산을 위해 Monitor에 전송
+            # sender의 Trust Score를 계산하기 위해 message를 Monitor에 전송
+            try:
+                requests.post(
+                    MONITOR_INGEST,
+                    json={"message": msg},
+                    timeout=1
+                )
+            except:
+                pass  # Monitor가 응답하지 않아도 계속 진행
+            
             monitor_log({
                 "direction": "in",
                 "agent": self.agent_id,
@@ -117,51 +147,54 @@ class BaseAgentServer:
                     "intended_recipient": recipient_id
                 })
             
-            # Check trust score with monitor before processing high-risk actions
+            # Monitor 정책 평가 (모든 action에 적용)
             action = msg.get("action")
             sender_id = msg.get("sender", {}).get("agent_id", "unknown")
-            
-            HIGH_RISK_ACTIONS = {"delete_resource", "modify_config"}
-            if action in HIGH_RISK_ACTIONS:
-                # Monitor에 trust score 확인 요청
-                try:
-                    check_response = requests.post(
-                        MONITOR_INGEST,
-                        json={"message": msg},
-                        timeout=2
-                    )
-                    if check_response.status_code == 200:
-                        check_data = check_response.json()
-                        allowed = check_data.get("allowed", False)
-                        trust_score = check_data.get("trust", 0.0)
-                        required_trust = check_data.get("required_trust", 0.8)
-                        
-                        if not allowed:
-                            monitor_log({
-                                "alert": "action_blocked_by_trust_score",
-                                "agent": self.agent_id,
-                                "sender": sender_id,
-                                "action": action,
-                                "trust_score": trust_score,
-                                "required_trust": required_trust
-                            })
-                            raise HTTPException(
-                                403,
-                                f"Action blocked: Trust score {trust_score:.2f} < required {required_trust:.2f}"
-                            )
-                except requests.exceptions.RequestException:
-                    # Monitor가 응답하지 않으면 경고만 하고 계속 진행
-                    monitor_log({
-                        "warning": "monitor_unavailable_for_trust_check",
-                        "agent": self.agent_id,
-                        "action": action
-                    })
-            
-            # Handle the action
             params = msg.get("params", {})
             
+            try:
+                eval_response = requests.post(
+                    MONITOR_EVAL,
+                    json={"message": msg},
+                    timeout=2
+                )
+                if eval_response.status_code == 200:
+                    eval_data = eval_response.json()
+                    allowed = eval_data.get("allowed", False)
+                    trust_score = eval_data.get("trust", 0.0)
+                    required_trust = eval_data.get("required_trust", 0.0)
+                    revoked_state = eval_data.get("revoked", False)
+
+                    if not allowed or revoked_state:
+                        monitor_log({
+                            "alert": "action_blocked_by_monitor",
+                            "agent": self.agent_id,
+                            "sender": sender_id,
+                            "action": action,
+                            "trust_score": trust_score,
+                            "required_trust": required_trust,
+                            "revoked": revoked_state
+                        })
+                        reason = "Agent revoked" if revoked_state else f"Trust score {trust_score:.2f} < required {required_trust:.2f}"
+                        raise HTTPException(403, f"Action blocked by monitor: {reason}")
+                else:
+                    monitor_log({
+                        "warning": "monitor_eval_failed",
+                        "agent": self.agent_id,
+                        "action": action,
+                        "status_code": eval_response.status_code
+                    })
+            except requests.exceptions.RequestException as exc:
+                monitor_log({
+                    "warning": "monitor_unavailable_for_trust_check",
+                    "agent": self.agent_id,
+                    "action": action,
+                    "error": str(exc)
+                })
+
+            # Handle the action
             result = await self._handle_action(action, params, msg)
-            
+
             monitor_log({
                 "direction": "out",
                 "agent": self.agent_id,
@@ -169,10 +202,43 @@ class BaseAgentServer:
                 "result": result
             })
             
+            # 행동 기반 탐지용 상세 로그 (Monitor에 전송)
+            try:
+                behavior_log = {
+                    "event_type": "action_executed",
+                    "executor_agent": self.agent_id,
+                    "sender_agent": sender_id,
+                    "action": action,
+                    "params": params,
+                    "result": result,
+                    "message_id": msg.get("message_id"),
+                    "correlation_id": msg.get("correlation_id"),
+                    "timestamp": msg.get("timestamp"),
+                    "direction": "in",  # 수신 agent의 관점
+                    "execution_status": "success" if isinstance(result, dict) and result.get("status") in ["ok", "received"] else "error",
+                    "execution_time_ms": 0  # 필요시 측정 가능
+                }
+                requests.post(
+                    "http://127.0.0.1:8100/api/behavior_log",
+                    json=behavior_log,
+                    timeout=0.5
+                )
+            except:
+                pass  # Monitor가 응답하지 않아도 계속 진행
+
             return result
         
         @self.app.get("/status")
         async def status():
+            # Update heartbeat in Agent Manager
+            try:
+                requests.post(
+                    f"{AGENT_MANAGER_URL}/heartbeat/{self.agent_id}",
+                    timeout=1
+                )
+            except:
+                pass  # Agent Manager가 없어도 계속 진행
+            
             return {
                 "agent_id": self.agent_id,
                 "status": "running",

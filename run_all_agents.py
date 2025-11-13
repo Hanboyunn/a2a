@@ -112,8 +112,10 @@ def main():
     print("🤖 A2A Agent System 시작")
     print("=" * 60)
     print("\n모니터링 대시보드: http://127.0.0.1:8100/dashboard")
+    print("Agent 관리 서버: http://127.0.0.1:8200")
     print("API 엔드포인트:")
     print("  - Monitor: http://127.0.0.1:8100")
+    print("  - Agent Manager: http://127.0.0.1:8200")
     print("  - Orchestrator: http://127.0.0.1:8000")
     print("  - User Agent: http://127.0.0.1:8001")
     print("  - Tool Agent: http://127.0.0.1:8002")
@@ -122,23 +124,27 @@ def main():
     print("⚠️  종료하려면 각 창에서 Ctrl+C를 누르거나 창을 닫으세요.")
     print("\n💡 Windows에서는 run_all_agents.bat를 사용하는 것을 권장합니다.\n")
     
-    # 1. Monitor 시작
+    # 1. Agent Manager 시작
+    run_agent("Agent Manager", "agent_manager.manager", 8200)
+    time.sleep(2)
+    
+    # 2. Monitor 시작
     run_agent("Monitor", "monitor.monitor", 8100)
     time.sleep(2)
     
-    # 2. Orchestrator 시작
+    # 3. Orchestrator 시작
     run_agent("Orchestrator", "agents.orchestrator", 8000)
     time.sleep(2)
     
-    # 3. Tool Agent 시작
+    # 4. Tool Agent 시작
     run_agent("Tool Agent", "agents.tool_agent", 8002)
     time.sleep(2)
     
-    # 4. User Agent 시작
+    # 5. User Agent 시작
     run_agent("User Agent", "agents.user_agent", 8001)
     time.sleep(2)
     
-    # 5. Admin Agent 시작
+    # 6. Admin Agent 시작
     run_agent("Admin Agent", "agents.admin_agent", 8003)
     time.sleep(2)
     
@@ -150,8 +156,8 @@ def main():
     print("종료하려면 Ctrl+C를 누르세요.\n")
     
     # 프로세스 모니터링 (포트 체크 방식)
-    agent_ports = [8100, 8000, 8002, 8001, 8003]
-    agent_names = ["Monitor", "Orchestrator", "Tool Agent", "User Agent", "Admin Agent"]
+    agent_ports = [8200, 8100, 8000, 8002, 8001, 8003]
+    agent_names = ["Agent Manager", "Monitor", "Orchestrator", "Tool Agent", "User Agent", "Admin Agent"]
     
     print("\n[모니터링 중...]")
     print("각 agent의 로그는 logs/ 디렉토리에서 확인할 수 있습니다.\n")

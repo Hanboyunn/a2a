@@ -53,5 +53,15 @@ msg-captured.json
 # 데이터 파일
 monitor/data.jsonl
 monitor/alerts.jsonl
+monitor/resource_access.jsonl
 monitor/trust_timeline.png
+
+# Agent Manager Database
+agent_manager/*.db
+agent_manager/__pycache__/
+
+# 리소스 파일 (실제 리소스는 커밋하지 않음, 샘플만)
+resources/*.txt
+!resources/.gitkeep
+
 

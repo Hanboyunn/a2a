@@ -7,13 +7,92 @@ AGENT_ID = "agent-user-01"
 PORT = 8001
 
 def generate_task():
-    """단일 행동 단위 정의 (랜덤하게 행동 선택 가능)"""
+    """실제 사용자 요청 시나리오 생성 - 현실적인 비즈니스 작업"""
     import random
-    actions = ["read_resource", "get_status", "ping"]
-    return {
-        "action": random.choice(actions),
-        "params": {"resource": f"doc-{uuid.uuid4().hex[:6]}"},
-    }
+    from datetime import datetime
+    
+    # 실제 사용자 시나리오: 비즈니스 요청, 데이터 분석, 리포트 생성 등
+    scenarios = [
+        {
+            "action": "request_task",
+            "params": {
+                "task": "generate_monthly_sales_report",
+                "params": {
+                    "period": datetime.now().strftime("%Y-%m"),
+                    "format": "pdf",
+                    "include_charts": True
+                }
+            },
+            "target": "agent-orch-01",
+            "description": "월간 매출 리포트 생성 요청"
+        },
+        {
+            "action": "request_task",
+            "params": {
+                "task": "analyze_customer_data",
+                "params": {
+                    "dataset": "customer_transactions",
+                    "analysis_type": "trend_analysis",
+                    "time_range": "last_30_days"
+                }
+            },
+            "target": "agent-orch-01",
+            "description": "고객 데이터 트렌드 분석 요청"
+        },
+        {
+            "action": "request_task",
+            "params": {
+                "task": "search_documents",
+                "params": {
+                    "query": random.choice(["Q4 strategy", "budget plan", "meeting notes"]),
+                    "document_type": random.choice(["pdf", "docx", "txt"]),
+                    "max_results": 10
+                }
+            },
+            "target": "agent-orch-01",
+            "description": "문서 검색 요청"
+        },
+        {
+            "action": "request_task",
+            "params": {
+                "task": "generate_weekly_summary",
+                "params": {
+                    "week": datetime.now().strftime("%Y-W%W"),
+                    "sections": ["sales", "marketing", "operations"]
+                }
+            },
+            "target": "agent-orch-01",
+            "description": "주간 요약 리포트 생성"
+        },
+        {
+            "action": "request_task",
+            "params": {
+                "task": "query_database",
+                "params": {
+                    "query": "SELECT COUNT(*) FROM users WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)",
+                    "database": "analytics_db"
+                }
+            },
+            "target": "agent-orch-01",
+            "description": "데이터베이스 쿼리 요청"
+        },
+        {
+            "action": "check_system_health",
+            "params": {},
+            "target": "agent-tool-01",
+            "description": "시스템 상태 확인"
+        },
+        {
+            "action": "get_service_status",
+            "params": {
+                "service": random.choice(["api", "database", "cache", "queue"])
+            },
+            "target": "agent-tool-01",
+            "description": "서비스 상태 확인"
+        }
+    ]
+    
+    return random.choice(scenarios)
 
 async def handle_read_resource(params: dict, full_msg: dict):
     """Handle read_resource action"""
@@ -41,19 +120,17 @@ async def handle_ping(params: dict, full_msg: dict):
     }
 
 def periodic_task_runner(agent_server: BaseAgentServer):
-    """Periodically send tasks to other agents"""
+    """다양한 실제 작업 패턴으로 주기적으로 작업 요청"""
     import random
     time.sleep(5)  # Wait for other agents to start
     
-    # Possible target agents
-    target_agents = ["agent-tool-01", "agent-admin-01", "agent-orch-01"]
-    
     print(f"[+] {AGENT_ID} periodic task runner started")
+    task_count = 0
+    
     while True:
         try:
             task = generate_task()
-            # Randomly select a target agent
-            target = random.choice(target_agents)
+            target = task.get("target", "agent-orch-01")
             
             try:
                 response = agent_server.send_to_agent(
@@ -61,14 +138,36 @@ def periodic_task_runner(agent_server: BaseAgentServer):
                     action=task["action"],
                     params=task["params"]
                 )
-                print(f"[{AGENT_ID}] Sent {task['action']} to {target}: {response.status_code}")
+                task_count += 1
+                description = task.get("description", task["action"])
+                print(f"[{AGENT_ID}] [{task_count}] {description} -> {target}: {response.status_code}")
+                
+                # 가끔 연속 작업 (실제 워크플로우 시뮬레이션)
+                if task_count % 7 == 0:
+                    # 복합 워크플로우: 리포트 생성 후 분석 요청
+                    try:
+                        agent_server.send_to_agent(
+                            recipient_id="agent-orch-01",
+                            action="request_task",
+                            params={
+                                "task": "analyze_report_data",
+                                "params": {
+                                    "report_id": f"report-{uuid.uuid4().hex[:8]}",
+                                    "analysis_type": "summary_statistics"
+                                }
+                            }
+                        )
+                        print(f"[{AGENT_ID}] [workflow] 연속 작업: 리포트 데이터 분석 요청")
+                    except:
+                        pass
+                
             except ValueError as e:
-                # Agent not registered yet, skip
                 print(f"[{AGENT_ID}] Target agent not available: {target}")
             except Exception as e:
                 print(f"[{AGENT_ID}] Error sending to {target}: {e}")
             
-            time.sleep(5)  # ⏱️ 일정 주기마다 task 수행
+            # 작업 간격을 다양하게 (3-8초)
+            time.sleep(random.uniform(3, 8))
         except KeyboardInterrupt:
             break
         except Exception as e:
